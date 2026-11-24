@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF to Images Converter</title>
+
+  <script src="pdf.min.js"></script>
+  <script src="jszip.min.js"></script>
+  <script>
+    // Point this to your local './pdf.worker.min.js' when running offline
+    const PDF_WORKER_URL = "pdf.worker.min.js";
+  </script>
+
+  <style>
+    /* --- THEME VARIABLES --- */
+    :root {
+      --bg: #f4f6f9;
+      --surface: #ffffff;
+      --surface-hover: #f9fafb;
+      --text: #111827;
+      --text-muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --accent-soft: rgba(37, 99, 235, 0.1);
+      --green: #16a34a;
+      --green-hover: #15803d;
+      --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.08);
+      --radius: 18px;
+      --radius-sm: 12px;
+      --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    [data-theme="dark"] {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface-hover: #273449;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --accent: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.15);
+      --green: #22c55e;
+      --green-hover: #16a34a;
+      --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.45);
+    }
+
+    /* --- RESET & BASE --- */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      transition: background-color var(--transition), color var(--transition);
+    }
+
+    /* --- HEADER --- */
+    header {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1.5rem 1.5rem 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      display: grid;
+      place-items: center;
+    }
+
+    .brand h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .theme-toggle {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 0.5rem 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      box-shadow: var(--shadow);
+      transition: transform var(--transition), background-color var(--transition), border-color var(--transition);
+    }
+
+    .theme-toggle:hover {
+      transform: translateY(-1px);
+      background: var(--surface-hover);
+    }
+
+    /* --- MAIN CONTAINER --- */
+    main {
+      flex: 1;
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1rem 1.5rem 3rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .view {
+      display: none;
+      animation: fadeSlideIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
+    .view.active {
+      display: block;
+    }
+
+    @keyframes fadeSlideIn {
+      from {
+        opacity: 0;
+        transform: translateY(14px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* --- VIEW 1: UPLOAD --- */
+    .upload-card {
+      max-width: 680px;
+      margin: 2rem auto;
+      background: var(--surface);
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 4rem 2rem;
+      text-align: center;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+      transition: border-color var(--transition), background-color var(--transition), transform var(--transition);
+    }
+
+    .upload-card:hover,
+    .upload-card.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      transform: translateY(-3px);
+    }
+
+    .upload-icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 1.25rem;
+      border-radius: 16px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      display: grid;
+      place-items: center;
+    }
+
+    .upload-card h2 {
+      font-size: 1.4rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .upload-card p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    #fileInput {
+      display: none;
+    }
+
+    /* --- VIEW 2: WORKSPACE (PREVIEW + SETTINGS) --- */
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: 1.6fr 1fr;
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    @media (max-width: 860px) {
+      .workspace-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .preview-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+
+    .file-name {
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 70%;
+    }
+
+    .page-badge {
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 0.25rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .pdf-frame {
+      width: 100%;
+      height: 65vh;
+      min-height: 460px;
+      border: none;
+      display: block;
+      background: #525659;
+    }
+
+    /* --- SETTINGS PANEL --- */
+    .settings-panel {
+      padding: 1.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .settings-panel h2 {
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .form-group label {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .form-group select,
+    .form-group input[type="number"] {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+
+    .form-group select:focus,
+    .form-group input[type="number"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .dpi-presets {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.5rem;
+    }
+
+    .preset-btn {
+      padding: 0.5rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .preset-btn.active,
+    .preset-btn:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .quality-wrapper {
+      display: none;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .quality-wrapper.visible {
+      display: flex;
+    }
+
+    input[type="range"] {
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    /* --- BUTTONS --- */
+    .btn {
+      width: 100%;
+      padding: 0.95rem 1.25rem;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      transition: transform var(--transition), background-color var(--transition), opacity var(--transition);
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-green {
+      background: var(--green);
+      color: #ffffff;
+      box-shadow: 0 6px 20px -6px rgba(22, 163, 74, 0.55);
+    }
+
+    .btn-green:hover {
+      background: var(--green-hover);
+      transform: translateY(-2px);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #ffffff;
+    }
+
+    .btn-primary:hover {
+      opacity: 0.92;
+      transform: translateY(-2px);
+    }
+
+    .btn-secondary {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background: var(--surface-hover);
+    }
+
+    /* --- VIEW 3: PROCESSING & DONE --- */
+    .status-card {
+      max-width: 560px;
+      margin: 2rem auto;
+      padding: 2.5rem 2rem;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.25rem;
+    }
+
+    .spinner {
+      width: 52px;
+      height: 52px;
+      border: 4px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 12px;
+      background: var(--bg);
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--green));
+      border-radius: 999px;
+      transition: width 0.25s ease-out;
+    }
+
+    .progress-meta {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .success-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: rgba(22, 163, 74, 0.15);
+      color: var(--green);
+      display: grid;
+      place-items: center;
+    }
+
+    .action-row {
+      width: 100%;
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+
+    @media (max-width: 480px) {
+      .action-row {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <circle cx="10" cy="14" r="2"/>
+          <path d="m20 17-1.296-1.296a2.41 2.41 0 0 0-3.408 0L9 22"/>
+        </svg>
+      </div>
+      <h1>PDF to Images</h1>
+    </div>
+
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme">
+      <span id="themeIcon"></span>
+      <span id="themeLabel">Theme</span>
+    </button>
+  </header>
+
+  <main>
+    <!-- VIEW 1: UPLOAD -->
+    <section id="viewUpload" class="view active">
+      <div id="dropZone" class="upload-card" role="button" tabindex="0" aria-label="Upload PDF file">
+        <div class="upload-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </div>
+        <h2>Drop your PDF here</h2>
+        <p>or click to browse from your computer</p>
+        <input type="file" id="fileInput" accept="application/pdf" />
+      </div>
+    </section>
+
+    <!-- VIEW 2: WORKSPACE -->
+    <section id="viewWorkspace" class="view">
+      <div class="workspace-grid">
+        <!-- Left: Browser native PDF Preview -->
+        <div class="card">
+          <div class="preview-header">
+            <span id="fileNameDisplay" class="file-name">document.pdf</span>
+            <span id="pageCountBadge" class="page-badge">Loading...</span>
+          </div>
+          <iframe id="pdfPreview" class="pdf-frame" title="PDF Preview"></iframe>
+        </div>
+
+        <!-- Right: Export Settings -->
+        <div class="card settings-panel">
+          <h2>Export Settings</h2>
+
+          <!-- 1. Format -->
+          <div class="form-group">
+            <label for="formatSelect">Image Format</label>
+            <select id="formatSelect">
+              <option value="image/png" data-ext="png">PNG — Lossless (Best quality)</option>
+              <option value="image/jpeg" data-ext="jpg">JPEG — Smaller file size</option>
+              <option value="image/webp" data-ext="webp">WebP — Modern &amp; lightweight</option>
+              <option value="image/avif" data-ext="avif">AVIF — Ultra-compressed (if supported)</option>
+            </select>
+          </div>
+
+          <!-- Optional Quality slider for lossy formats -->
+          <div id="qualityWrapper" class="quality-wrapper">
+            <label for="qualityRange">
+              <span>Compression Quality</span>
+              <span id="qualityValue">92%</span>
+            </label>
+            <input type="range" id="qualityRange" min="0.5" max="1" step="0.02" value="0.92" />
+          </div>
+
+          <!-- 2. DPI -->
+          <div class="form-group">
+            <label for="dpiInput">Resolution (DPI)</label>
+            <div class="dpi-presets">
+              <button type="button" class="preset-btn" data-dpi="72">72</button>
+              <button type="button" class="preset-btn active" data-dpi="150">150</button>
+              <button type="button" class="preset-btn" data-dpi="300">300</button>
+              <button type="button" class="preset-btn" data-dpi="600">600</button>
+            </div>
+            <input type="number" id="dpiInput" min="36" max="600" value="150" />
+          </div>
+
+          <!-- 3. Export Button -->
+          <button id="exportBtn" class="btn btn-green" type="button">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Export to Images
+          </button>
+
+          <button id="cancelBtn" class="btn btn-secondary" type="button">
+            Choose another PDF
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 3: PROCESSING -->
+    <section id="viewProcessing" class="view">
+      <div class="card status-card">
+        <div class="spinner"></div>
+        <h2 id="processingTitle">Converting pages...</h2>
+        <div class="progress-track">
+          <div id="progressFill" class="progress-fill"></div>
+        </div>
+        <div class="progress-meta">
+          <span id="progressPageText">Page 0 of 0</span>
+          <span id="progressPercent">0%</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 4: COMPLETED -->
+    <section id="viewDone" class="view">
+      <div class="card status-card">
+        <div class="success-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+        <h2>Export Complete!</h2>
+        <p id="doneSummary" style="color: var(--text-muted); font-size: 0.95rem;">
+          Your ZIP archive has been downloaded automatically.
+        </p>
+        <div class="action-row">
+          <button id="downloadAgainBtn" class="btn btn-primary" type="button">
+            Download Again
+          </button>
+          <button id="resetBtn" class="btn btn-secondary" type="button">
+            Reset
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // Configure PDF.js worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
+
+    // --- STATE ---
+    let currentPdfDoc = null;
+    let currentPdfUrl = null;
+    let currentBaseName = "document";
+    let generatedZipUrl = null;
+    let generatedZipName = "document.zip";
+
+    // --- DOM ELEMENTS ---
+    const views = {
+      upload: document.getElementById("viewUpload"),
+      workspace: document.getElementById("viewWorkspace"),
+      processing: document.getElementById("viewProcessing"),
+      done: document.getElementById("viewDone"),
+    };
+
+    const dropZone = document.getElementById("dropZone");
+    const fileInput = document.getElementById("fileInput");
+    const pdfPreview = document.getElementById("pdfPreview");
+    const fileNameDisplay = document.getElementById("fileNameDisplay");
+    const pageCountBadge = document.getElementById("pageCountBadge");
+
+    const formatSelect = document.getElementById("formatSelect");
+    const qualityWrapper = document.getElementById("qualityWrapper");
+    const qualityRange = document.getElementById("qualityRange");
+    const qualityValue = document.getElementById("qualityValue");
+    const dpiInput = document.getElementById("dpiInput");
+    const presetBtns = document.querySelectorAll(".preset-btn");
+
+    const exportBtn = document.getElementById("exportBtn");
+    const cancelBtn = document.getElementById("cancelBtn");
+    const processingTitle = document.getElementById("processingTitle");
+    const progressFill = document.getElementById("progressFill");
+    const progressPageText = document.getElementById("progressPageText");
+    const progressPercent = document.getElementById("progressPercent");
+
+    const doneSummary = document.getElementById("doneSummary");
+    const downloadAgainBtn = document.getElementById("downloadAgainBtn");
+    const resetBtn = document.getElementById("resetBtn");
+
+    // --- THEME MANAGEMENT (AUTO + MANUAL) ---
+    const themeToggle = document.getElementById("themeToggle");
+    const themeIcon = document.getElementById("themeIcon");
+    const themeLabel = document.getElementById("themeLabel");
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+    function applyTheme(theme) {
+      document.documentElement.setAttribute("data-theme", theme);
+      if (theme === "dark") {
+        themeIcon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>`;
+        themeLabel.textContent = "Light";
+      } else {
+        themeIcon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
+        themeLabel.textContent = "Dark";
+      }
+    }
+
+    const savedTheme = localStorage.getItem("pdf2img-theme");
+    applyTheme(savedTheme || (mediaQuery.matches ? "dark" : "light"));
+
+    mediaQuery.addEventListener("change", (e) => {
+      if (!localStorage.getItem("pdf2img-theme")) {
+        applyTheme(e.matches ? "dark" : "light");
+      }
+    });
+
+    themeToggle.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme");
+      const next = current === "dark" ? "light" : "dark";
+      localStorage.setItem("pdf2img-theme", next);
+      applyTheme(next);
+    });
+
+    // --- VIEW SWITCHER ---
+    function showView(name) {
+      Object.values(views).forEach((v) => v.classList.remove("active"));
+      views[name].classList.add("active");
+    }
+
+    // --- UPLOAD HANDLERS ---
+    dropZone.addEventListener("click", () => fileInput.click());
+    dropZone.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    ["dragenter", "dragover"].forEach((evt) => {
+      dropZone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropZone.classList.add("drag-over");
+      });
+    });
+
+    ["dragleave", "drop"].forEach((evt) => {
+      dropZone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("drag-over");
+      });
+    });
+
+    dropZone.addEventListener("drop", (e) => {
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(file);
+    });
+
+    fileInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (file) handleFile(file);
+    });
+
+    async function handleFile(file) {
+      if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+        alert("Please select a valid PDF file.");
+        return;
+      }
+
+      try {
+        currentBaseName = file.name.replace(/\.pdf$/i, "");
+        fileNameDisplay.textContent = file.name;
+        pageCountBadge.textContent = "Loading...";
+
+        // Create preview URL for native browser PDF viewer
+        if (currentPdfUrl) URL.revokeObjectURL(currentPdfUrl);
+        currentPdfUrl = URL.createObjectURL(file);
+        pdfPreview.src = currentPdfUrl;
+
+        showView("workspace");
+
+        // Load PDF with PDF.js
+        const arrayBuffer = await file.arrayBuffer();
+        currentPdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const total = currentPdfDoc.numPages;
+        pageCountBadge.textContent = `${total} ${total === 1 ? "page" : "pages"}`;
+      } catch (err) {
+        console.error(err);
+        alert("Could not read this PDF file. It may be corrupted or password-protected.");
+        resetApp();
+      }
+    }
+
+    // --- SETTINGS INTERACTIONS ---
+    formatSelect.addEventListener("change", () => {
+      const isLossy = formatSelect.value !== "image/png";
+      qualityWrapper.classList.toggle("visible", isLossy);
+    });
+
+    qualityRange.addEventListener("input", () => {
+      qualityValue.textContent = `${Math.round(qualityRange.value * 100)}%`;
+    });
+
+    presetBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        dpiInput.value = btn.dataset.dpi;
+        updatePresetHighlight();
+      });
+    });
+
+    dpiInput.addEventListener("input", updatePresetHighlight);
+
+    function updatePresetHighlight() {
+      presetBtns.forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.dpi === dpiInput.value);
+      });
+    }
+
+    // --- EXPORT LOGIC ---
+    exportBtn.addEventListener("click", async () => {
+      if (!currentPdfDoc) return;
+
+      const mimeType = formatSelect.value;
+      const selectedOption = formatSelect.options[formatSelect.selectedIndex];
+      const ext = selectedOption.dataset.ext;
+      const quality = parseFloat(qualityRange.value);
+      const dpi = Math.min(600, Math.max(36, parseInt(dpiInput.value, 10) || 150));
+      const scale = dpi / 72; // Standard PDF resolution is 72 DPI
+
+      const totalPages = currentPdfDoc.numPages;
+      const zip = new JSZip();
+      const padLength = String(totalPages).length;
+
+      showView("processing");
+      processingTitle.textContent = "Converting pages...";
+      updateProgress(0, totalPages);
+
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+
+      try {
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+          const page = await currentPdfDoc.getPage(pageNum);
+          const viewport = page.getViewport({ scale });
+
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+
+          // White background for formats without transparency (like JPEG)
+          if (mimeType === "image/jpeg") {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+          } else {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+          }
+
+          await page.render({ canvasContext: ctx, viewport }).promise;
+
+          const blob = await new Promise((resolve) =>
+            canvas.toBlob(resolve, mimeType, quality)
+          );
+
+          if (!blob) {
+            throw new Error(`Your browser does not support exporting to ${ext.toUpperCase()}.`);
+          }
+
+          const pageLabel = String(pageNum).padStart(padLength, "0");
+          zip.file(`${currentBaseName}_page_${pageLabel}.${ext}`, blob);
+
+          updateProgress(pageNum, totalPages);
+        }
+
+        processingTitle.textContent = "Creating ZIP archive...";
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+
+        if (generatedZipUrl) URL.revokeObjectURL(generatedZipUrl);
+        generatedZipUrl = URL.createObjectURL(zipBlob);
+        generatedZipName = `${currentBaseName}.zip`;
+
+        doneSummary.textContent = `Exported ${totalPages} ${totalPages === 1 ? "page" : "pages"} as ${ext.toUpperCase()} (${dpi} DPI) into "${generatedZipName}".`;
+        showView("done");
+
+        // Trigger automatic download
+        triggerDownload();
+      } catch (err) {
+        console.error(err);
+        alert(err.message || "An error occurred during conversion.");
+        showView("workspace");
+      }
+    });
+
+    function updateProgress(current, total) {
+      const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+      progressFill.style.width = `${percent}%`;
+      progressPageText.textContent = `Page ${current} of ${total}`;
+      progressPercent.textContent = `${percent}%`;
+    }
+
+    function triggerDownload() {
+      if (!generatedZipUrl) return;
+      const a = document.createElement("a");
+      a.href = generatedZipUrl;
+      a.download = generatedZipName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    downloadAgainBtn.addEventListener("click", triggerDownload);
+    cancelBtn.addEventListener("click", resetApp);
+    resetBtn.addEventListener("click", resetApp);
+
+    function resetApp() {
+      if (currentPdfUrl) {
+        URL.revokeObjectURL(currentPdfUrl);
+        currentPdfUrl = null;
+      }
+      if (generatedZipUrl) {
+        URL.revokeObjectURL(generatedZipUrl);
+        generatedZipUrl = null;
+      }
+      currentPdfDoc = null;
+      pdfPreview.src = "about:blank";
+      fileInput.value = "";
+      showView("upload");
+    }
+  </script>
+</body>
+</html>

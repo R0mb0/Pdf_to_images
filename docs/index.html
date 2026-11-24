@@ -5,17 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PDF to Images Converter</title>
 
-  <!-- =====================================================================
-       EXTERNAL LIBRARIES (Download these 3 files for offline/local use)
-       1. pdf.min.js        -> https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js
-       2. pdf.worker.min.js -> https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js
-       3. jszip.min.js      -> https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
-       ===================================================================== -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="pdf.min.js"></script>
+  <script src="jszip.min.js"></script>
   <script>
     // Point this to your local './pdf.worker.min.js' when running offline
-    const PDF_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    const PDF_WORKER_URL = "pdf.worker.min.js";
   </script>
 
   <style>
